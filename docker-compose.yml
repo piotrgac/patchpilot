@@ -1,0 +1,45 @@
+services:
+  ubuntu-01:
+    build:
+      context: .
+      dockerfile: docker/ubuntu/Dockerfile
+    hostname: ubuntu-01
+    privileged: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    networks:
+      lab:
+        ipv4_address: 10.10.0.11
+    ports:
+      - "2221:22"
+      - "8081:80"
+
+  ubuntu-broken:
+    build:
+      context: .
+      dockerfile: docker/ubuntu/Dockerfile
+    hostname: ubuntu-broken
+    privileged: true
+    tmpfs:
+      - /tmp
+      - /run
+      - /run/lock
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    networks:
+      lab:
+        ipv4_address: 10.10.0.12
+    ports:
+      - "2222:22"
+      - "8082:80"
+
+networks:
+  lab:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.10.0.0/24

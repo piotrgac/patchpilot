@@ -49,6 +49,9 @@ def _resolve_pm(distro_id: str) -> type[PackageManager] | None:
 
 
 class RolloutExecutor:
+    TERMINAL_HOST_STATUSES = {HostState.HEALTHY, HostState.ROLLED_BACK, HostState.SKIPPED}
+    SKIPPABLE_STEP_STATUSES = {"completed", "skipped"}
+
     def __init__(
         self,
         inventory: InventoryModel,
@@ -56,6 +59,7 @@ class RolloutExecutor:
         db: DatabaseManager,
         ssh_pool: SSHConnectionPool | None = None,
         auto_approve: bool = False,
+        resume_rollout_id: str | None = None,
     ) -> None:
         self.inventory = inventory
         self.plan = plan
@@ -69,8 +73,9 @@ class RolloutExecutor:
             backoff=inventory.connection.retry.backoff_seconds,
         )
         self.auto_approve = auto_approve
-        self.rollout_id: str | None = None
+        self.rollout_id = resume_rollout_id
         self._audit: AuditLogger | None = None
+        self._resume_mode = resume_rollout_id is not None
 
     @property
     def _conn_settings(self) -> dict[str, Any]:
@@ -109,57 +114,103 @@ class RolloutExecutor:
             )
 
         async with self.db.session() as session:
-            # Check lock
-            if not await self._acquire_lock(session):
-                raise RuntimeError(
-                    f"Rollout already in progress for environment "
-                    f"'{self.inventory.metadata_.name}'"
+            if self._resume_mode and self.rollout_id:
+                # Resume existing rollout
+                stmt = select(Rollout).where(Rollout.id == self.rollout_id)
+                result = await session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                if not existing:
+                    raise RuntimeError(f"Rollout to resume not found: {self.rollout_id}")
+
+                existing.status = RolloutState.IN_PROGRESS.value
+                existing.maintenance_window_ok = mw.is_open()
+
+                # Load existing host records and determine which are done
+                stmt = select(RolloutHost).where(
+                    RolloutHost.rollout_id == self.rollout_id
+                )
+                result = await session.execute(stmt)
+                existing_hosts = result.scalars().all()
+                terminal_hosts = {
+                    h.host_name
+                    for h in existing_hosts
+                    if h.status in {s.value for s in self.TERMINAL_HOST_STATUSES}
+                }
+
+                logger.info(
+                    "Resuming rollout %s: %d hosts done, skipping %d terminal",
+                    self.rollout_id,
+                    len(existing_hosts) - len(terminal_hosts),
+                    len(terminal_hosts),
                 )
 
-            # Create rollout record
-            rollout = Rollout(
-                env_name=self.inventory.metadata_.name,
-                strategy_type=self.plan.strategy_name,
-                status=RolloutState.IN_PROGRESS.value,
-                created_by=_get_user(),
-                started_at=datetime.utcnow(),
-                maintenance_window_ok=mw.is_open(),
-                plan_json={
-                    "total_packages": self.plan.total_packages,
-                    "total_security": self.plan.total_security,
-                    "reboot_count": self.plan.reboot_count,
-                    "batches": [
-                        [h.name for h in batch]
-                        for batch in self.plan.batches
-                    ],
-                },
-            )
-            session.add(rollout)
-            await session.flush()
-            self.rollout_id = rollout.id
+                # Filter plan batches: remove hosts that are already in terminal state
+                filtered_batches = []
+                for batch in self.plan.batches:
+                    filtered = [h for h in batch if h.name not in terminal_hosts]
+                    if filtered:
+                        filtered_batches.append(filtered)
+                self.plan.batches = filtered_batches
 
-            # Create host records
-            for ph in self.plan.hosts:
-                rh = RolloutHost(
-                    rollout_id=rollout.id,
-                    host_name=ph.host.name,
-                    host_role=ph.host.role,
-                    address=str(ph.host.address),
-                    status=HostState.PENDING.value,
-                    snapshot_type=ph.snapshot_technology,
-                    reboot_required=ph.reboot_required,
+            else:
+                # Create new rollout
+                if not await self._acquire_lock(session):
+                    raise RuntimeError(
+                        f"Rollout already in progress for environment "
+                        f"'{self.inventory.metadata_.name}'"
+                    )
+
+                rollout = Rollout(
+                    env_name=self.inventory.metadata_.name,
+                    strategy_type=self.plan.strategy_name,
+                    status=RolloutState.IN_PROGRESS.value,
+                    created_by=_get_user(),
+                    started_at=datetime.utcnow(),
+                    maintenance_window_ok=mw.is_open(),
+                    plan_json={
+                        "total_packages": self.plan.total_packages,
+                        "total_security": self.plan.total_security,
+                        "reboot_count": self.plan.reboot_count,
+                        "batches": [
+                            [h.name for h in batch]
+                            for batch in self.plan.batches
+                        ],
+                    },
                 )
-                session.add(rh)
+                session.add(rollout)
+                await session.flush()
+                self.rollout_id = rollout.id
+
+                # Create host records
+                for ph in self.plan.hosts:
+                    rh = RolloutHost(
+                        rollout_id=rollout.id,
+                        host_name=ph.host.name,
+                        host_role=ph.host.role,
+                        address=str(ph.host.address),
+                        status=HostState.PENDING.value,
+                        snapshot_type=ph.snapshot_technology,
+                        reboot_required=ph.reboot_required,
+                    )
+                    session.add(rh)
 
             await session.commit()
 
-        self._audit = AuditLogger(self.db, self.rollout_id)
-        await self._audit.log("rollout_started", {
-            "env": self.inventory.metadata_.name,
-            "strategy": self.plan.strategy_name,
-            "hosts": [ph.host.name for ph in self.plan.hosts],
-            "plan": self.plan,
-        })
+        if not self.rollout_id:
+            raise RuntimeError("Rollout ID not set")
+
+        if not self._resume_mode:
+            self._audit = AuditLogger(self.db, self.rollout_id)
+            await self._audit.log("rollout_started", {
+                "env": self.inventory.metadata_.name,
+                "strategy": self.plan.strategy_name,
+                "hosts": [ph.host.name for ph in self.plan.hosts],
+                "plan": self.plan,
+            })
+
+        if not self.plan.batches:
+            logger.info("No pending hosts to process. Rollout already complete.")
+            return self.rollout_id
 
         # Execute batches
         try:

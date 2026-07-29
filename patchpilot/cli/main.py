@@ -164,7 +164,9 @@ def deploy(
         click.echo(f"  Strategy: {plan_result.strategy_name}")
         click.echo("")
 
-        if not auto_approve and not resume:
+        if resume:
+            click.echo(f"Resuming rollout: {resume}")
+        elif not auto_approve:
             click.confirm("Proceed with deployment?", abort=True)
 
         db = _get_db(inv)
@@ -176,11 +178,12 @@ def deploy(
             db=db,
             ssh_pool=pool,
             auto_approve=auto_approve,
+            resume_rollout_id=resume,
         )
         rollout_id = asyncio.get_event_loop().run_until_complete(executor.execute())
         asyncio.get_event_loop().run_until_complete(executor.close())
 
-        click.secho(f"Rollout completed: {rollout_id}", bold=True, fg="green")
+        click.secho(f"Rollout {'resumed' if resume else 'completed'}: {rollout_id}", bold=True, fg="green")
 
     except click.ClickException:
         raise
@@ -279,16 +282,46 @@ def status(rollout_id: str, watch: bool, output_format: str) -> None:
 @click.argument("rollout_id")
 @click.option("--host", help="Only rollback this specific host")
 @click.option("--all", "all_hosts", is_flag=True, help="Rollback all hosts")
-def rollback(rollout_id: str, host: str | None, all_hosts: bool) -> None:
+@click.option("--ssh-user", default="root", help="SSH user for rollback connection")
+@click.option("--ssh-key-path", type=click.Path(exists=True), help="SSH private key path")
+def rollback(rollout_id: str, host: str | None, all_hosts: bool,
+             ssh_user: str, ssh_key_path: str | None) -> None:
     """Rollback a rollout (restore snapshots)."""
-    if not host and not all_hosts:
-        click.confirm(
-            f"Rollback entire rollout '{rollout_id}'? This will restore snapshots for all hosts.",
-            abort=True,
-        )
+    from patchpilot.rollback import RollbackService
 
-    click.echo(f"Rollback of {rollout_id} is not yet implemented in detail.")
-    click.echo("Use 'patchpilot status' to check which hosts have snapshots.")
+    db = DatabaseManager(DatabaseManager.default_path())
+
+    async def _do_rollback():
+        await db.initialize()
+        service = RollbackService(db)
+        try:
+            if host:
+                results = [await service.rollback_host(
+                    rollout_id, host, ssh_user=ssh_user, ssh_key_path=ssh_key_path,
+                )]
+            elif all_hosts or click.confirm(
+                f"Rollback entire rollout '{rollout_id}'? "
+                f"This will restore snapshots for all hosts.",
+                abort=True,
+            ):
+                results = await service.rollback_all(
+                    rollout_id, ssh_user=ssh_user, ssh_key_path=ssh_key_path,
+                )
+            else:
+                return
+
+            click.echo("")
+            click.secho("Rollback results:", bold=True)
+            for r in results:
+                if r.success:
+                    click.secho(f"  {r.host_name} ✓ {r.message}", fg="green")
+                else:
+                    click.secho(f"  {r.host_name} ✗ {r.message}", fg="red")
+
+        finally:
+            await service.close()
+
+    asyncio.get_event_loop().run_until_complete(_do_rollback())
 
 
 @cli.command()

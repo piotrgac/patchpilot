@@ -76,6 +76,10 @@ include = ["patchpilot*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "integration: Integration tests that require Docker containers",
+    "slow: Tests that take longer than 30 seconds",
+]
 filterwarnings = ["ignore::DeprecationWarning"]
 log_cli = true
 log_cli_level = "INFO"
