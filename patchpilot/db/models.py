@@ -57,6 +57,7 @@ class Rollout(Base):
 
     __table_args__ = (
         Index("idx_rollouts_env_status", "env_name", "status"),
+        Index("idx_rollouts_started_at", "started_at"),
     )
 
 
@@ -139,7 +140,6 @@ class RolloutStep(Base):
     host: Mapped["RolloutHost"] = relationship(back_populates="steps")
 
     __table_args__ = (
-        UniqueConstraint("rollout_host_id", "step_type"),
         Index("idx_rollout_steps_host", "rollout_host_id"),
     )
 

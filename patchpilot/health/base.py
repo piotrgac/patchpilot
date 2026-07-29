@@ -30,6 +30,7 @@ class HealthCheck(ABC):
 class HealthCheckSuite:
     def __init__(self, checks: list[HealthCheck]) -> None:
         self._checks = checks
+        self._last_results: list[HealthResult] = []
 
     async def run_all(self, session: SSHSession) -> list[HealthResult]:
         results: list[HealthResult] = []
@@ -63,15 +64,15 @@ class HealthCheckSuite:
                     await asyncio.sleep(5)
 
             if not results[-1].passed:
+                self._last_results = results
                 return results
 
+        self._last_results = results
         return results
 
     @property
     def all_passed(self) -> bool:
-        return all(
-            getattr(r, 'passed', False) for r in self._checks
-        )
+        return len(self._last_results) > 0 and all(r.passed for r in self._last_results)
 
 
 def build_suite(configs: list[HealthCheckModel]) -> HealthCheckSuite:

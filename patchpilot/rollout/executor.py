@@ -24,12 +24,14 @@ from patchpilot.inventory.models import HostModel, InventoryModel
 from patchpilot.maintenance.window import MaintenanceWindow
 from patchpilot.packages.apt import AptPackageManager
 from patchpilot.packages.base import PackageManager
+from patchpilot.packages.dnf import DnfPackageManager
+from patchpilot.packages.pacman import PacmanPackageManager
 from patchpilot.rollout.planner import PlannedHost, RolloutPlan
 from patchpilot.rollout.state_machine import (
     HostState,
     RolloutState,
 )
-from patchpilot.snapshots.base import SnapshotProvider
+from patchpilot.snapshots.base import SnapshotInfo, SnapshotProvider
 from patchpilot.snapshots.detector import SnapshotDetector
 from patchpilot.ssh.client import (
     RetryableSSHClient,
@@ -41,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 def _resolve_pm(distro_id: str) -> type[PackageManager] | None:
-    for cls in [AptPackageManager]:
+    for cls in [AptPackageManager, DnfPackageManager, PacmanPackageManager]:
         if cls.detect(distro_id, ""):
             return cls
     return None
@@ -216,6 +218,9 @@ class RolloutExecutor:
             return self.rollout_id
 
         # Execute batches
+        final_status = RolloutState.COMPLETED
+        aborted_reason: str | None = None
+
         try:
             for batch_idx, batch in enumerate(self.plan.batches):
                 logger.info(
@@ -227,10 +232,11 @@ class RolloutExecutor:
                     logger.warning(
                         "Maintenance window closed. Stopping after current batch."
                     )
+                    final_status = RolloutState.FAILED
                     break
 
                 tasks = [
-                    self._execute_host(session, ph) for ph in self.plan.hosts
+                    self._execute_host(ph) for ph in self.plan.hosts
                     if ph.host in batch
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -245,18 +251,18 @@ class RolloutExecutor:
 
                 if has_failure:
                     logger.warning("Batch %d has failures. Stopping rollout.", batch_idx + 1)
+                    final_status = RolloutState.FAILED
                     break
 
         except Exception as e:
             logger.error("Rollout failed: %s", e)
-            await self._finalize(session, RolloutState.FAILED, str(e))
-            raise
+            final_status = RolloutState.FAILED
+            aborted_reason = str(e)
 
-        await self._finalize(session, RolloutState.COMPLETED)
-
+        await self._finalize(final_status, aborted_reason)
         return self.rollout_id
 
-    async def _execute_host(self, _session: AsyncSession, ph: "PlannedHost") -> bool:
+    async def _execute_host(self, ph: "PlannedHost") -> bool:
         if ph.connection_error:
             await self._set_host_status(
                 ph.host.name, HostState.SKIPPED,
@@ -267,6 +273,7 @@ class RolloutExecutor:
         host = ph.host
         settings = self._host_settings(host.name)
         host_success = True
+        created_snap: SnapshotInfo | None = None
 
         try:
             sess = await self._pool.acquire(
@@ -287,6 +294,7 @@ class RolloutExecutor:
                             label,
                             timeout=self.inventory.snapshot.timeout,
                         )
+                        created_snap = snap
                         await self._add_step(
                             host.name, "snapshot", "completed",
                             snapshot_info_json={
@@ -295,6 +303,7 @@ class RolloutExecutor:
                             },
                         )
                         snapshot_provider = provider
+                        await self._set_host_snapshot(host.name, snap.name)
                         await self._audit.log("host_snapshot", {
                             "host": host.name,
                             "snapshot_name": snap.name,
@@ -376,21 +385,17 @@ class RolloutExecutor:
                     host.name, "verify", "failed",
                     log_output=json.dumps([r.details for r in health_results if not r.passed]),
                 )
-                # Rollback
-                if snapshot_provider:
+                # Rollback — restore the original pre-update snapshot
+                if snapshot_provider and created_snap:
                     await self._set_host_status(host.name, HostState.ROLLING_BACK)
                     try:
-                        snap = await snapshot_provider.create(
-                            f"rollback-{host.name}",
-                            timeout=self.inventory.snapshot.timeout,
-                        )
-                        await snapshot_provider.restore(snap)
+                        await snapshot_provider.restore(created_snap)
                         await self._set_host_status(host.name, HostState.ROLLED_BACK)
                         await self._add_step(host.name, "rollback", "completed")
                         await self._audit.log("host_rollback", {
                             "host": host.name,
                             "reason": "health check failed",
-                            "snapshot": snap.name,
+                            "snapshot": created_snap.name,
                         })
                     except Exception as rb_e:
                         logger.error("Rollback failed for %s: %s", host.name, rb_e)
@@ -456,6 +461,19 @@ class RolloutExecutor:
                     rh.error_log = error
                 await session.commit()
 
+    async def _set_host_snapshot(self, host_name: str, snapshot_name: str) -> None:
+        async with self.db.session() as session:
+            stmt = select(RolloutHost).where(
+                RolloutHost.rollout_id == self.rollout_id,
+                RolloutHost.host_name == host_name,
+            )
+            result = await session.execute(stmt)
+            rh = result.scalar_one_or_none()
+            if rh:
+                rh.snapshot_name = snapshot_name
+                rh.snapshot_created_at = datetime.utcnow()
+                await session.commit()
+
     async def _add_step(
         self, host_name: str, step_type: str, status: str,
         packages_json: list | None = None,
@@ -513,7 +531,7 @@ class RolloutExecutor:
             self.rollout_id or "",
         )
 
-    async def _finalize(self, _session: AsyncSession, status: RolloutState, reason: str | None = None) -> None:
+    async def _finalize(self, status: RolloutState, reason: str | None = None) -> None:
         if not self.rollout_id:
             return
 
@@ -527,6 +545,10 @@ class RolloutExecutor:
                 if reason:
                     rollout.aborted_reason = reason
                 await s.commit()
+
+            # Release the environment lock
+            from patchpilot.locking.db_lock import release_lock
+            await release_lock(s, self.inventory.metadata_.name)
 
         if self._audit:
             await self._audit.log(

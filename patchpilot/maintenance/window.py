@@ -85,7 +85,7 @@ class MaintenanceWindow:
 
     def next_open(self, from_dt: datetime | None = None) -> datetime | None:
         if from_dt is None:
-            from_dt = datetime.utcnow()
+            from_dt = datetime.now(self._tz)
 
         if not self.windows:
             return from_dt

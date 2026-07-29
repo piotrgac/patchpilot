@@ -129,9 +129,9 @@ def deploy(
     strategy: str | None,
     auto_approve: bool,
     dry_run: bool,
-    limit: str | None,  # noqa: ARG001
-    skip_health_checks: bool,  # noqa: ARG001
-    force: bool,  # noqa: ARG001
+    limit: str | None,
+    skip_health_checks: bool,
+    force: bool,
     resume: str | None,
 ) -> None:
     """Execute a rollout deployment."""
@@ -140,6 +140,19 @@ def deploy(
 
         if strategy:
             inv.strategy.type = strategy  # type: ignore[assignment]
+
+        if limit:
+            import fnmatch
+            inv.hosts = [h for h in inv.hosts if fnmatch.fnmatch(h.name, limit)]
+            if not inv.hosts:
+                raise click.UsageError(f"No hosts match --limit pattern: {limit}")
+
+        if force:
+            inv.maintenance.deploy_outside_window = True
+
+        if skip_health_checks:
+            inv.health_checks.global_.clear()
+            inv.health_checks.per_role = {}
 
         pool = SSHConnectionPool(parallel_limit=inv.connection.parallel_limit)
 
