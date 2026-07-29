@@ -1,0 +1,92 @@
+---
+metadata:
+  name: lab
+  description: "Local lab environment for testing PatchPilot"
+  owner: developer
+
+connection:
+  ssh_user: deploy
+  ssh_key_path: ~/.ssh/patchpilot_lab_ed25519
+  ssh_timeout: 15
+  sudo: true
+  parallel_limit: 3
+  retry:
+    max_attempts: 2
+    backoff_seconds: 3
+
+hosts:
+  - name: ubuntu-01
+    address: 10.0.0.11
+    role: api
+    tags:
+      - canary-eligible
+  - name: debian-01
+    address: 10.0.0.12
+    role: api
+    tags:
+      - canary-eligible
+  - name: rocky-01
+    address: 10.0.0.13
+    role: database
+
+strategy:
+  type: canary
+  canary:
+    count: 1
+    tag_filter: canary-eligible
+  batch:
+    size: 2
+    wait_for_batch: true
+    health_check_timeout: 120
+
+health_checks:
+  global:
+    - type: systemd
+      service: ssh.service
+      state: active
+  per_role:
+    api:
+      - type: http
+        url: http://localhost:8080/health
+        method: GET
+        expected_status: 200
+        timeout: 10
+        retries: 2
+      - type: systemd
+        service: nginx.service
+        state: active
+    database:
+      - type: tcp
+        host: localhost
+        port: 5432
+        timeout: 5
+      - type: command
+        command: "pg_isready -q"
+        expected_exit_code: 0
+
+snapshot:
+  preferred: auto
+  on_unavailable: warn
+  timeout: 60
+
+maintenance:
+  timezone: UTC
+  windows:
+    - start: "00:00"
+      end: "23:59"
+      days:
+        - monday
+        - tuesday
+        - wednesday
+        - thursday
+        - friday
+        - saturday
+        - sunday
+
+audit:
+  enabled: true
+  db_path: ~/.local/share/patchpilot/rollouts.db
+  hash_chain: false
+
+metrics:
+  enabled: false
