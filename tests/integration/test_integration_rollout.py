@@ -1,11 +1,10 @@
 """Integration tests: full rollout workflow — plan, deploy, status, rollback."""
 
-import asyncio
 
 import pytest
 
 from patchpilot.rollout.executor import RolloutExecutor
-from patchpilot.rollout.planner import RolloutPlanner, RolloutPlan
+from patchpilot.rollout.planner import RolloutPlan, RolloutPlanner
 from patchpilot.ssh.client import SSHSession
 
 
@@ -13,7 +12,7 @@ from patchpilot.ssh.client import SSHSession
 @pytest.mark.slow
 class TestRollout:
     """Full rollout lifecycle tests.
-    
+
     These tests start docker containers, plan a rollout, execute it,
     verify health checks pass, and test failure scenarios.
     """
@@ -37,21 +36,19 @@ class TestRollout:
         finally:
             await planner.close()
 
-    async def test_plan_detects_ubuntu(self, inventory, ssh_key, docker_hosts) -> None:
+    async def test_plan_detects_ubuntu(self, inventory) -> None:
         """Planner should correctly detect Ubuntu on the Ubuntu containers."""
         planner = RolloutPlanner(inventory, ssh_pool=None)
         try:
             plan = await planner.plan()
             for ph in plan.hosts:
-                if "rocky" in ph.host.name:
-                    continue  # Rocky uses a different package manager not in MVP
                 assert ph.distro.distro_id in ("ubuntu", "debian"), (
                     f"Expected Ubuntu/Debian on {ph.host.name}, got {ph.distro.distro_id}"
                 )
         finally:
             await planner.close()
 
-    async def test_executor_full_rollout(self, inventory, ssh_key, db, docker_hosts) -> None:
+    async def test_executor_full_rollout(self, inventory, db) -> None:
         """Full rollout: plan → execute → all hosts healthy."""
         planner = RolloutPlanner(inventory)
         try:
@@ -83,6 +80,7 @@ class TestRollout:
 
             # Verify all hosts were marked healthy
             from sqlalchemy import select
+
             from patchpilot.db.models import RolloutHost
 
             async with db.session() as session:
@@ -129,7 +127,8 @@ class TestRollout:
             rollout_id = await executor.execute()
 
             from sqlalchemy import select
-            from patchpilot.db.models import RolloutHost, Rollout
+
+            from patchpilot.db.models import Rollout, RolloutHost
 
             async with db.session() as session:
                 result = await session.execute(

@@ -1,7 +1,7 @@
-from enum import Enum, auto
+from enum import StrEnum
 
 
-class HostState(str, Enum):
+class HostState(StrEnum):
     PENDING = "pending"
     SNAPSHOTTING = "snapshotting"
     UPDATING = "updating"
@@ -14,7 +14,7 @@ class HostState(str, Enum):
     SKIPPED = "skipped"
 
 
-class RolloutState(str, Enum):
+class RolloutState(StrEnum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     PAUSED = "paused"

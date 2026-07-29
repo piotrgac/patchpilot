@@ -11,7 +11,7 @@ class CommandHealthCheck(HealthCheck):
         return "command"
 
     async def check(self, session: SSHSession) -> HealthResult:
-        command = self.config.command
+        command = self.config.command or ""
         expected = self.config.expected_exit_code
 
         result = await session.run(

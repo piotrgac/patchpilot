@@ -1,4 +1,3 @@
-import re
 
 from patchpilot.snapshots.base import SnapshotProvider
 from patchpilot.ssh.client import SSHSession

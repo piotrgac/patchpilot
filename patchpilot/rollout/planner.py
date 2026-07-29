@@ -3,9 +3,9 @@ from dataclasses import dataclass, field
 
 from patchpilot.inventory.models import HostModel, InventoryModel
 from patchpilot.packages.base import PackageManager, PackageUpdate
+from patchpilot.rollout.strategies import build_strategy
 from patchpilot.snapshots.detector import SnapshotDetector
-from patchpilot.ssh.client import RetryableSSHClient, SSHConnectionPool
-from patchpilot.rollout.strategies import RolloutStrategy, build_strategy
+from patchpilot.ssh.client import SSHConnectionPool, SSHSession
 
 
 @dataclass
@@ -53,7 +53,7 @@ class RolloutPlan:
     strategy_name: str = ""
 
 
-def _resolve_package_manager(distro_id: str, session: "SSHSession | None") -> type[PackageManager] | None:
+def _resolve_package_manager(distro_id: str, session: "SSHSession | None" = None) -> type[PackageManager] | None:  # noqa: ARG001
     from patchpilot.packages.apt import AptPackageManager
     from patchpilot.packages.dnf import DnfPackageManager
     from patchpilot.packages.pacman import PacmanPackageManager
@@ -76,7 +76,6 @@ class RolloutPlanner:
         )
 
     async def plan(self) -> RolloutPlan:
-        from patchpilot.ssh.client import SSHSession
 
         hosts_to_plan = list(self.inventory.hosts)
         planned_hosts: list[PlannedHost] = []
@@ -117,7 +116,6 @@ class RolloutPlanner:
                 security_count = sum(1 for u in updates if u.is_security)
 
                 # Detect snapshot
-                detector = SnapshotDetector(session)
                 snapshot_tech = await SnapshotDetector.available_types(session)
 
                 return PlannedHost(
@@ -144,7 +142,7 @@ class RolloutPlanner:
         for result in results:
             if isinstance(result, Exception):
                 continue
-            planned_hosts.append(result)
+            planned_hosts.append(result)  # type: ignore[arg-type]
 
         # Build strategy and batches
         strategy = build_strategy(self.inventory.strategy, self.inventory)

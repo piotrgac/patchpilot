@@ -1,7 +1,6 @@
 """Integration tests: SSH connectivity and basic command execution."""
 
 import pytest
-import pytest_asyncio
 
 from patchpilot.ssh.client import SSHSession
 
@@ -74,6 +73,6 @@ class TestSSHConnection:
             username="deploy",
             timeout=3,
         )
-        with pytest.raises(Exception):
+        with pytest.raises((OSError, TimeoutError, Exception)):
             await session.connect()
         await session.disconnect()

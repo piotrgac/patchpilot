@@ -1,8 +1,8 @@
 import logging
 import subprocess
 import time
+from collections.abc import AsyncGenerator
 from pathlib import Path
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio

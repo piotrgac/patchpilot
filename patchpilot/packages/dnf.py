@@ -1,4 +1,3 @@
-import re
 from typing import ClassVar
 
 from patchpilot.packages.base import PackageManager, PackageUpdate, UpdateResult
@@ -10,7 +9,7 @@ class DnfPackageManager(PackageManager):
     ]
 
     @classmethod
-    def detect(cls, distro_id: str, version: str) -> bool:
+    def detect(cls, distro_id: str, version: str = "") -> bool:  # noqa: ARG003
         return distro_id.lower() in cls.DISTROS
 
     async def check_updates(self) -> list[PackageUpdate]:
@@ -71,7 +70,4 @@ class DnfPackageManager(PackageManager):
             sudo=True,
             timeout=15,
         )
-        if "YES" in result.stdout:
-            return True
-
-        return False
+        return "YES" in result.stdout

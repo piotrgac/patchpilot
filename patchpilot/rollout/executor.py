@@ -12,30 +12,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from patchpilot.audit.logger import AuditLogger
 from patchpilot.db.models import (
     HealthCheckResult as DBHealthCheckResult,
+)
+from patchpilot.db.models import (
     Rollout,
     RolloutHost,
     RolloutStep,
 )
 from patchpilot.db.session import DatabaseManager
 from patchpilot.health.base import HealthResult, build_suite
-from patchpilot.inventory.models import InventoryModel
+from patchpilot.inventory.models import HostModel, InventoryModel
 from patchpilot.maintenance.window import MaintenanceWindow
-from patchpilot.packages.base import PackageManager, UpdateResult
 from patchpilot.packages.apt import AptPackageManager
-from patchpilot.rollout.planner import RolloutPlanner, RolloutPlan
+from patchpilot.packages.base import PackageManager
+from patchpilot.rollout.planner import PlannedHost, RolloutPlan
 from patchpilot.rollout.state_machine import (
     HostState,
     RolloutState,
-    validate_host_transition,
 )
-from patchpilot.rollout.strategies import build_strategy
 from patchpilot.snapshots.base import SnapshotProvider
 from patchpilot.snapshots.detector import SnapshotDetector
 from patchpilot.ssh.client import (
     RetryableSSHClient,
     SSHConnectionPool,
     SSHError,
-    SSHResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,8 +73,12 @@ class RolloutExecutor:
         )
         self.auto_approve = auto_approve
         self.rollout_id = resume_rollout_id
-        self._audit: AuditLogger | None = None
+        self._audit: AuditLogger
         self._resume_mode = resume_rollout_id is not None
+        if resume_rollout_id:
+            self._audit = AuditLogger(db, resume_rollout_id)
+        else:
+            self._audit = AuditLogger(db, "")  # set properly in execute()
 
     @property
     def _conn_settings(self) -> dict[str, Any]:
@@ -126,11 +129,11 @@ class RolloutExecutor:
                 existing.maintenance_window_ok = mw.is_open()
 
                 # Load existing host records and determine which are done
-                stmt = select(RolloutHost).where(
+                host_stmt = select(RolloutHost).where(
                     RolloutHost.rollout_id == self.rollout_id
                 )
-                result = await session.execute(stmt)
-                existing_hosts = result.scalars().all()
+                host_result = await session.execute(host_stmt)
+                existing_hosts = host_result.scalars().all()
                 terminal_hosts = {
                     h.host_name
                     for h in existing_hosts
@@ -253,7 +256,7 @@ class RolloutExecutor:
 
         return self.rollout_id
 
-    async def _execute_host(self, session: AsyncSession, ph: "PlannedHost") -> bool:
+    async def _execute_host(self, _session: AsyncSession, ph: "PlannedHost") -> bool:
         if ph.connection_error:
             await self._set_host_status(
                 ph.host.name, HostState.SKIPPED,
@@ -354,16 +357,9 @@ class RolloutExecutor:
 
             # Store health check results in DB
             for hr in health_results:
-                db_result = DBHealthCheckResult(
-                    rollout_host_id=0,  # will be set below
-                    check_type=hr.check_type,
-                    passed=hr.passed,
-                    details=hr.details,
-                    duration_ms=int(hr.duration_ms),
-                    retry_number=hr.retry_number,
-                )
                 await self._add_health(host.name, hr)
-                await self._audit.log("host_health_check", {
+                if self._audit:
+                    await self._audit.log("host_health_check", {
                     "host": host.name,
                     "check_type": hr.check_type,
                     "passed": hr.passed,
@@ -517,7 +513,7 @@ class RolloutExecutor:
             self.rollout_id or "",
         )
 
-    async def _finalize(self, session: AsyncSession, status: RolloutState, reason: str | None = None) -> None:
+    async def _finalize(self, _session: AsyncSession, status: RolloutState, reason: str | None = None) -> None:
         if not self.rollout_id:
             return
 

@@ -43,5 +43,5 @@ class PackageManager(ABC):
 
     @classmethod
     @abstractmethod
-    def detect(cls, distro_id: str, version: str) -> bool:
+    def detect(cls, distro_id: str, version: str = "") -> bool:
         pass

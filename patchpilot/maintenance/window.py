@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, time as dt_time, timedelta
+from datetime import datetime, timedelta, tzinfo
+from datetime import time as dt_time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from patchpilot.inventory.models import MaintenanceConfig, MaintenanceWindowDef
+    from patchpilot.inventory.models import MaintenanceConfig
 
 
 class MaintenanceWindow:
@@ -15,10 +16,10 @@ class MaintenanceWindow:
     ) -> None:
         self.timezone_str = timezone_str
         self.windows = windows or []
-        self._tz = self._load_timezone()
+        self._tz: tzinfo = self._load_timezone()
 
     @classmethod
-    def from_config(cls, config: MaintenanceConfig) -> "MaintenanceWindow":
+    def from_config(cls, config: MaintenanceConfig) -> MaintenanceWindow:
         windows: list[tuple[dt_time, dt_time, set[int]]] = []
         day_map = {
             "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
@@ -38,32 +39,32 @@ class MaintenanceWindow:
             windows=windows,
         )
 
-    def _load_timezone(self) -> object:
+    def _load_timezone(self) -> tzinfo:
         try:
             import zoneinfo
             return zoneinfo.ZoneInfo(self.timezone_str)
         except Exception:
             import warnings
-            warnings.warn(f"Could not load timezone '{self.timezone_str}', falling back to UTC")
+            warnings.warn(f"Could not load timezone '{self.timezone_str}', falling back to UTC", stacklevel=2)
             import datetime as dt_mod
-            return dt_mod.timezone.utc
+            return dt_mod.UTC
 
     def is_open(self, dt: datetime | None = None) -> bool:
         if dt is None:
-            dt = datetime.utcnow()
+            dt = datetime.now(self._tz)
 
         if not self.windows:
             return True
 
         # Convert to configured timezone
         try:
-            local_dt = dt.astimezone(self._tz) if hasattr(dt, 'astimezone') else dt
+            local_dt = dt.astimezone(self._tz)
         except (ValueError, OSError):
             local_dt = dt
 
         try:
-            weekday = local_dt.weekday() if hasattr(local_dt, 'weekday') else 0
-            local_time = local_dt.time() if hasattr(local_dt, 'time') else dt.time()
+            weekday = local_dt.weekday()
+            local_time = local_dt.time()
         except (AttributeError, ValueError):
             weekday = 0
             local_time = dt.time()

@@ -90,7 +90,6 @@ def plan(environment: str, inventory: str | None, output: str) -> None:
 
         click.secho("Execution order:", bold=True)
         for batch_idx, batch in enumerate(result.batches):
-            label = "CANARY" if batch_idx == 0 and result.strategy_name == "canary" else f"BATCH {batch_idx}"
             for host in batch:
                 ph = next((p for p in result.hosts if p.host.name == host.name), None)
                 if ph:
@@ -130,9 +129,9 @@ def deploy(
     strategy: str | None,
     auto_approve: bool,
     dry_run: bool,
-    limit: str | None,
-    skip_health_checks: bool,
-    force: bool,
+    limit: str | None,  # noqa: ARG001
+    skip_health_checks: bool,  # noqa: ARG001
+    force: bool,  # noqa: ARG001
     resume: str | None,
 ) -> None:
     """Execute a rollout deployment."""
@@ -199,9 +198,10 @@ def deploy(
 def status(rollout_id: str, watch: bool, output_format: str) -> None:
     """Show the current status of a rollout."""
     import time
+
     from sqlalchemy import select
 
-    from patchpilot.db.models import HealthCheckResult, Rollout, RolloutHost
+    from patchpilot.db.models import Rollout, RolloutHost
 
     db = DatabaseManager(DatabaseManager.default_path())
 

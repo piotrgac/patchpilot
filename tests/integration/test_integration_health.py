@@ -2,10 +2,10 @@
 
 import pytest
 
-from patchpilot.health.systemd import SystemdHealthCheck
-from patchpilot.health.http import HttpHealthCheck
 from patchpilot.health.command import CommandHealthCheck
+from patchpilot.health.http import HttpHealthCheck
 from patchpilot.health.journal import JournalHealthCheck
+from patchpilot.health.systemd import SystemdHealthCheck
 from patchpilot.inventory.models import HealthCheckModel
 from patchpilot.ssh.client import SSHSession
 

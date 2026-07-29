@@ -80,7 +80,7 @@ def build_strategy(config: StrategyModel, inventory: InventoryModel) -> RolloutS
         "batch": BatchStrategy,
         "single": SingleStrategy,
     }
-    cls = strategies.get(config.type)
-    if cls is None:
+    strategy_cls = strategies.get(config.type)
+    if strategy_cls is None:
         raise ValueError(f"Unknown strategy type: {config.type}")
-    return cls(config, inventory)
+    return strategy_cls(config, inventory)  # type: ignore[abstract]

@@ -3,7 +3,6 @@ import json
 from datetime import datetime
 
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from patchpilot.db.models import AuditEvent
 from patchpilot.db.session import DatabaseManager

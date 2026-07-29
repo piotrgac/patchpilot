@@ -7,7 +7,7 @@ class PacmanPackageManager(PackageManager):
     DISTROS: ClassVar[list[str]] = ["arch"]
 
     @classmethod
-    def detect(cls, distro_id: str, version: str) -> bool:
+    def detect(cls, distro_id: str, version: str = "") -> bool:  # noqa: ARG003
         return distro_id.lower() in cls.DISTROS
 
     async def check_updates(self) -> list[PackageUpdate]:

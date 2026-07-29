@@ -82,7 +82,7 @@ class SSHSession:
             raise SSHAuthenticationError(
                 f"Permission denied for {self._username}@{self._host}: {e}"
             ) from e
-        except asyncssh.misc.ConnectError as e:
+        except (OSError, asyncssh.Error) as e:
             raise SSHConnectionError(
                 f"Cannot connect to {self._host}:{self._port}: {e}"
             ) from e
@@ -116,6 +116,7 @@ class SSHSession:
         start = asyncio.get_event_loop().time()
 
         try:
+            assert self._conn is not None
             result = await asyncio.wait_for(
                 self._conn.run(
                     effective_cmd,
@@ -124,21 +125,23 @@ class SSHSession:
                 ),
                 timeout=effective_timeout,
             )
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             raise SSHConnectionError(
                 f"Command timed out after {effective_timeout}s on {self._host}: {command[:100]}"
             ) from e
-        except asyncssh.misc.ChannelError as e:
+        except (asyncssh.ChannelOpenError, OSError) as e:
             raise SSHCommandError(
                 command,
                 SSHResult(exit_code=-1, stdout="", stderr=str(e), duration_ms=0),
             ) from e
 
         duration_ms = (asyncio.get_event_loop().time() - start) * 1000
+        stdout_str = result.stdout if isinstance(result.stdout, str) else (result.stdout or b"").decode("utf-8", errors="replace")
+        stderr_str = result.stderr if isinstance(result.stderr, str) else (result.stderr or b"").decode("utf-8", errors="replace")
         return SSHResult(
             exit_code=result.returncode or 0,
-            stdout=result.stdout or "",
-            stderr=result.stderr or "",
+            stdout=stdout_str,
+            stderr=stderr_str,
             duration_ms=duration_ms,
         )
 
@@ -159,23 +162,24 @@ class SSHSession:
         effective_timeout = timeout or self._timeout
 
         try:
+            assert self._conn is not None
             async with asyncio.timeout(effective_timeout):
                 async with self._conn.create_process(effective_cmd) as process:
                     async for line in process.stdout:
                         yield line.rstrip("\n")
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise SSHConnectionError(
                 f"Command stream timed out after {effective_timeout}s on {self._host}"
-            )
+            ) from None
 
     async def put_file(self, local_path: Path, remote_path: str) -> None:
-        if not self.connected:
+        if not self.connected or self._conn is None:
             raise SSHConnectionError(f"Not connected to {self._host}")
         async with self._conn.start_sftp_client() as sftp:
             await sftp.put(str(local_path), remote_path)
 
     async def get_file(self, remote_path: str, local_path: Path) -> None:
-        if not self.connected:
+        if not self.connected or self._conn is None:
             raise SSHConnectionError(f"Not connected to {self._host}")
         async with self._conn.start_sftp_client() as sftp:
             await sftp.get(remote_path, str(local_path))

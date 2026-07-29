@@ -1,6 +1,5 @@
-from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -38,7 +37,7 @@ class ConnectionSettings(BaseModel):
                 import warnings
                 warnings.warn(
                     f"SSH key {resolved} has permissive permissions ({oct(mode & 0o777)}). "
-                    f"Expected 0o600."
+                    f"Expected 0o600.", stacklevel=2
                 )
         return v
 

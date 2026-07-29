@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from patchpilot.inventory.models import HealthCheckModel
 from patchpilot.ssh.client import SSHSession
@@ -69,15 +69,17 @@ class HealthCheckSuite:
 
     @property
     def all_passed(self) -> bool:
-        return all(r.passed for r in self._checks)
+        return all(
+            getattr(r, 'passed', False) for r in self._checks
+        )
 
 
 def build_suite(configs: list[HealthCheckModel]) -> HealthCheckSuite:
-    from patchpilot.health.systemd import SystemdHealthCheck
-    from patchpilot.health.http import HttpHealthCheck
-    from patchpilot.health.tcp import TcpHealthCheck
     from patchpilot.health.command import CommandHealthCheck
+    from patchpilot.health.http import HttpHealthCheck
     from patchpilot.health.journal import JournalHealthCheck
+    from patchpilot.health.systemd import SystemdHealthCheck
+    from patchpilot.health.tcp import TcpHealthCheck
 
     type_map = {
         "systemd": SystemdHealthCheck,
@@ -92,6 +94,6 @@ def build_suite(configs: list[HealthCheckModel]) -> HealthCheckSuite:
         cls = type_map.get(cfg.type)
         if cls is None:
             raise ValueError(f"Unknown health check type: {cfg.type}")
-        checks.append(cls(cfg))
+        checks.append(cls(cfg))  # type: ignore[abstract]
 
     return HealthCheckSuite(checks)

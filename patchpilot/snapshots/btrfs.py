@@ -1,5 +1,3 @@
-import time
-from datetime import datetime
 
 from patchpilot.snapshots.base import SnapshotInfo, SnapshotProvider
 from patchpilot.ssh.client import SSHSession
@@ -20,7 +18,7 @@ class BtrfsSnapshotProvider(SnapshotProvider):
             "findmnt -n -o SOURCE / 2>/dev/null",
             timeout=10,
         )
-        source = result.stdout.strip()
+        result.stdout.strip()
         pool_dir = "/.patchpilot_snapshots"
 
         # Ensure snapshot directory exists

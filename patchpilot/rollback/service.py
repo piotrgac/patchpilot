@@ -42,13 +42,13 @@ class RollbackService:
             if not rollout:
                 raise RollbackError(f"Rollout not found: {rollout_id}")
 
-            stmt = (
+            host_stmt = (
                 select(RolloutHost)
                 .where(RolloutHost.rollout_id == rollout_id)
                 .where(RolloutHost.snapshot_name.isnot(None))
             )
-            result = await session.execute(stmt)
-            hosts = result.scalars().all()
+            host_result = await session.execute(host_stmt)
+            hosts = host_result.scalars().all()
 
             if not hosts:
                 raise RollbackError(
@@ -123,7 +123,7 @@ class RollbackService:
         except Exception as e:
             raise RollbackError(
                 f"Cannot connect to {host.host_name} ({host.address}): {e}"
-            )
+            ) from e
 
         provider = self._resolve_provider(snapshot_type, session)
         if not provider:
@@ -152,11 +152,11 @@ class RollbackService:
             raise RollbackError(
                 f"Rollback of {snapshot_type} snapshots is not implemented "
                 f"for {host.host_name}. Manual intervention required."
-            )
+            ) from None
         except Exception as e:
             raise RollbackError(
                 f"Failed to restore snapshot on {host.host_name}: {e}"
-            )
+            ) from e
 
         # Update DB
         async with self.db.session() as s:

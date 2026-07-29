@@ -14,7 +14,7 @@ class AptPackageManager(PackageManager):
     DISTROS: ClassVar[list[str]] = ["ubuntu", "debian"]
 
     @classmethod
-    def detect(cls, distro_id: str, version: str) -> bool:
+    def detect(cls, distro_id: str, version: str = "") -> bool:  # noqa: ARG003
         return distro_id.lower() in cls.DISTROS
 
     async def check_updates(self) -> list[PackageUpdate]:
@@ -44,7 +44,6 @@ class AptPackageManager(PackageManager):
         return packages
 
     async def apply_updates(self, dry_run: bool = False) -> UpdateResult:
-        import asyncio
         import time
 
         if dry_run:

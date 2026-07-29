@@ -1,6 +1,6 @@
 """Unit tests for audit logger functionality."""
-from patchpilot.db.session import DatabaseManager
 from patchpilot.audit.logger import AuditLogger
+from patchpilot.db.session import DatabaseManager
 
 
 class TestAuditLogger:
@@ -13,6 +13,7 @@ class TestAuditLogger:
         await logger.log("rollout_started", {"env": "test", "hosts": ["h1"]})
 
         from sqlalchemy import select
+
         from patchpilot.db.models import AuditEvent
 
         async with db.session() as session:
